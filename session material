@@ -1,0 +1,143 @@
+# code for seminar CSP
+
+#import excel file
+
+install.packages("readxl")
+
+#load functions from dplyr
+install.packages("dplyr")
+
+#load functions from tiydr
+install.packages("tidyr")
+
+#load packages
+library(readxl)
+library(dplyr)
+library(tidyr)
+
+
+setwd("C:\\TORNQVIST R\\TQ Multiple series agg\\")
+
+#Replacate the TQ index function for aggregating multliple measures per industry
+#import data
+df<-read_excel("data_tq.xlsx", sheet=3)
+
+head(df)
+
+#create data frames for cost measures and another 
+# for index (quantity index)
+
+df_cost<-select(df, Computers=Computers_c , Communication=Communication_c, Other=Other_c, sector, Year)
+
+df_qty<-select(df, Computers=Computers, Communication=Communication, Other= Other, sector, Year)
+
+
+
+tornqvist_index_m<-function(quantity_var,cost_var,base_year){
+  {
+    #count the number of assets to be aggregated in the TQ
+    colmn<-ncol(cost_var)
+    totvars<-colmn-2
+    
+    # total number of variables is stored in object totvars
+    # minus 2- remove year and sector 
+    
+    #block 1
+    df_cost_t<-gather(cost_var, ems,cost, 1:totvars)
+    
+    df_qty_t<-gather(quantity_var, ems,qty, 1:totvars)
+    
+    all<-inner_join(df_cost_t,df_qty_t, by= c("sector"="sector", "ems"="ems","Year"="Year"))
+    
+    sort_all<-arrange(all, sector, Year)
+    
+    total_cost<-aggregate(cost~sector+Year, sort_all,sum)
+    
+    inner_join(sort_all,total_cost, by= c("sector"="sector", "Year"="Year"))%>%mutate(value_share=cost.x/cost.y)->total_cost_2
+    
+    tornqvist_data_1<-arrange(total_cost_2, sector,ems, Year)
+    
+    tornqvist_data_2<-tornqvist_data_1%>%group_by(sector,ems)%>%mutate(lag_vshare=dplyr::lag(value_share, n=1, default=NA),
+                                                                       lag_qty=dplyr::lag(qty, n=1, default=NA))
+    
+    tornqvist_data_3<-tornqvist_data_2%>%group_by(sector,ems,Year)%>% mutate(ave_value_share =  ((value_share + lag_vshare )* 0.5),
+                                                                             log_quantity = log(qty) - log (lag_qty),
+                                                                             Product = log_quantity * ave_value_share )
+    
+    tornqvist_data_4<-tornqvist_data_3%>%select(Year, ems, sector, Product,cost.y)
+    
+    #block 2
+    
+    tornqvist_5<-tornqvist_data_4%>%group_by(sector,Year)%>% summarise(quantity_1=sum(Product), vp=mean(cost.y))
+    
+    tornqvist_6<-tornqvist_5%>%group_by(sector)%>% mutate(Q = exp(quantity_1) ,Q=if_else(is.na(Q), 1,Q),q_cumulate = cumprod(Q))
+    
+    ty<-tornqvist_6[tornqvist_6$Year == base_year, ]%>%select(sector, Year,q_cumulate)%>%rename(yrbaseyrq_cumul=q_cumulate)
+    
+    tornqvist_7<-merge(tornqvist_6,ty, by="sector", all=TRUE)%>%mutate(quantity=q_cumulate/yrbaseyrq_cumul)%>%
+      select(-Year.y,-yrbaseyrq_cumul,-Q,-quantity_1,-q_cumulate)%>%rename(Year=Year.x)%>%mutate(price=vp/quantity)
+  }
+  return(tornqvist_7)
+}
+
+tornqvist_index_m(df_qty,df_cost,2009)
+
+
+setwd("C:\\TORNQVIST R\\TQ multiple industries\\")
+
+
+#import data which has few measures with multiple industries 
+df<-read_excel("file for tq multiple industries.xls", sheet=1)
+
+#check data 
+head(df)
+edit(df)
+#select the quantity (or price) index and cost 
+#filter for number of industries you want to aggregate
+
+
+input<-select(df, ce , qex, naics, year)
+
+tornqvist_index_ind<-function(input,base_year,NAME){
+  {
+    
+    df_2<-data.frame(input)%>%arrange(year)
+    
+    #block 1
+    #get the total cost of all the industries
+    df_3<-aggregate(ce~year, df_2,sum)%>%rename(total_cost=ce)
+    
+    df_4<-left_join(input,df_3, by= c("year"="year"))%>%mutate(value_share=ce/total_cost)
+    
+    df_5<-df_4%>%arrange(naics,year)
+    
+    df_6<-df_5%>%group_by(naics)%>%mutate(lag_vshare=lag(value_share),
+                                          lag_qex=lag(qex), ave_valueshare =  ((value_share + lag_vshare)*0.5) ,
+                                          Log_qty_chg = log(qex) - log(lag_qex),
+                                          Product = Log_qty_chg * ave_valueshare)
+    
+    df_7<-df_6%>%arrange(year,naics)
+    
+    #block 2
+    #get the total contributions of all industries
+    df_8<-aggregate(Product~year, df_7,sum)%>%rename(TQ=Product)%>%
+      mutate(quant =exp(TQ))
+    
+    df_9<-left_join(df_3,df_8, by= c("year"="year"))
+    
+    df_10<-select(df_9, year , total_cost, quant)%>%
+      mutate(quant= ifelse(is.na(quant),1,quant), q_cumulate = cumprod(quant),NAICS=NAME)
+    
+    df_11<-df_10[df_10$year == base_year, ]%>%select( year,q_cumulate)%>%
+      rename(yrbaseyrq_cumul=q_cumulate)%>%mutate(NAICS=NAME)
+    
+    tq_1<-merge(df_10,df_11,by="NAICS",all=TRUE)%>%
+      mutate(quant_index=q_cumulate/yrbaseyrq_cumul)%>%
+      select(-year.y,-yrbaseyrq_cumul,-quant,-q_cumulate)%>%rename(year=year.x)%>%mutate(price=total_cost/quant_index)
+    
+  }
+  return(tq_1)
+}
+
+final<-tornqvist_index_ind(input,2009,"MAN")
+
