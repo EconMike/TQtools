@@ -83,6 +83,10 @@ tornqvist_index_m<-function(quantity_var,cost_var,base_year){
 tornqvist_index_m(df_qty,df_cost,2009)
 
 
+#aggreagate multiple industries together.
+
+#set your working directory for the excel file "file for tq multiple industries.xls"
+
 setwd("C:\\TORNQVIST R\\TQ multiple industries\\")
 
 
@@ -92,9 +96,8 @@ df<-read_excel("file for tq multiple industries.xls", sheet=1)
 #check data 
 head(df)
 edit(df)
-#select the quantity (or price) index and cost 
-#filter for number of industries you want to aggregate
 
+#select the quantity (or price) index and cost 
 
 input<-select(df, ce , qex, naics, year)
 
